@@ -1,4 +1,4 @@
-## STAPI
+## STAPI [![Build Status](https://travis-ci.org/aknackd/stapi.svg?branch=master)](https://travis-ci.org/aknackd/stapi)
 
 The Star Trek API. Inspired by [SWAPI](https://swapi.co/).
 
