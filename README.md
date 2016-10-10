@@ -14,13 +14,13 @@ The Star Trek API. Inspired by [SWAPI](https://swapi.co/).
 $ composer install
 $ php artisan migrate
 $ php artisan db:seed
-$ php -S localhost:8080 -t public
-$ curl http://localhost:8080/version
+$ php artisan serve
+$ curl http://localhost:8000/api/v1/series
 ```
 
 ### Importing data from Memory Alpha
 
-The seed data included in this project only contains the Star Trek series up to 2016, minus episodes. This information can be imported from [Memory Alpha](http://memory-alpha.wikia.com/wiki/Portal:Main), a community wiki containing in-depth information on Star Trek (canon sources only).
+The seed data included in this project only contains the Star Trek series and films up to 2016. Episodes from all series can be imported from [Memory Alpha](http://memory-alpha.wikia.com/wiki/Portal:Main), a community wiki containing in-depth information on Star Trek (canon sources only).
 
 Before you begin importing data from Memory Alpha, you must first install [7-zip](http://www.7-zip.org) and ensure that the `7za` binary is in your `$PATH`. Once that has been fulfilled, simply run the import artisan task like so:
 
