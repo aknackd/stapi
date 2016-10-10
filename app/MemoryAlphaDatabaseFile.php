@@ -13,6 +13,7 @@ use App\Helpers\EnvironmentHelper;
 use App\Helpers\HttpHelper;
 use App\Models\Episode;
 use App\Models\Series;
+use App\Models\Species;
 
 final class MemoryAlphaDatabaseFile
 {
@@ -205,7 +206,7 @@ final class MemoryAlphaDatabaseFile
         // Series are automatically seeded on `php artisan db:seed`
         $series = Series::all()->pluck('id', 'abbreviation');
 
-        $counts = ['episodes' => 0];
+        $counts = ['episodes' => 0, 'species' => 0];
 
         $pagesToIgnoreRegex = sprintf('/^(%s)/', implode('|', [
             'Memory Alpha:', 'Help:', 'User:', 'File:', 'User talk:', 'Talk:',
@@ -225,7 +226,7 @@ final class MemoryAlphaDatabaseFile
             }
 
             $title = (string) $xmlNode->title;
-            $title = trim(str_replace(['(episode)'], '', $title));
+            $title = trim(str_replace(['(episode)', '(species)'], '', $title));
             if (preg_match($pagesToIgnoreRegex, $title)) {
                 continue;
             }
@@ -239,11 +240,12 @@ final class MemoryAlphaDatabaseFile
                 continue;
             }
 
-            switch ($details['type']) {
+            switch ($details['__type__']) {
+
             //
             // Handle episodes
             //
-            case 'episode':
+            case 'episodea':
                 if (!$series->has($details['sSeries'])) {
                     continue;
                 }
@@ -263,6 +265,62 @@ final class MemoryAlphaDatabaseFile
                     'air_date'      => $details['nSerialAirdate'],
                 ]);
                 $counts['episodes']++;
+                break;
+
+            //
+            // Handle species
+            //
+            case 'species':
+                $planets   = isset($details['planet'])   ? preg_split('/(<br \/>|\/)/', $details['planet'])   : [];
+                $quadrants = isset($details['quadrant']) ? preg_split('/(<br \/>|\/)/', $details['quadrant']) : [];
+
+                // Species could belong to more than one planet (ex: Voth)
+                if (isset($details['planet']) && isset($details['planet2'])) {
+                    $planets[] = preg_split('/(<br \/>|\/)/', $details['planet2']);
+                }
+                // Also quadrants (Voth, again)
+                if (isset($details['quadrant']) && isset($details['quadrant2'])) {
+                    $quadrants[] = preg_split('/(<br \/>|\/)/', $details['quadrant2']);
+                }
+
+                $planets = array_flatten($planets);
+                $quadrants = array_flatten($quadrants);
+
+                // Extract planet name from a wiki link, if present
+                foreach ($planets as $idx => $planet) {
+                    if (str_contains($planet, '|')) {
+                        $planet = array_first(explode('|', $planet));
+                        // Anchor link likely has the proper planet name
+                        if (str_contains($planet, '#')) {
+                            $planet = array_last(explode('#', $planet));
+                        }
+                    }
+                    $planets[$idx] = $planet;
+                }
+
+                // Only Milky Way Galaxy quadrants
+                $quadrants = array_filter($quadrants, function ($item) {
+                    if (is_array($item) && count($item) == 1) {
+                        $item = array_first($item);
+                    }
+                    return preg_match('/^(alpha|beta|gamma|delta)/i', $item);
+                });
+
+                if (isset($details['type'])) {
+                    // If a wiki link, get the proper name
+                    if (str_contains($details['type'], '|')) {
+                        $details['type'] = array_last(explode('|', $details['type']));
+                    } 
+                }
+
+                Species::create([
+                    'name'       => $title,
+                    'type'       => isset($details['type']) ? strtolower($details['type']) : null,
+                    'quadrants'  => json_encode($quadrants),
+                    'planets'    => json_encode($planets),
+                    'population' => isset($details['pop']) ? $details['pop'] : null,
+                ]);
+                $counts['species']++;
                 break;
             }
 
@@ -293,14 +351,30 @@ final class MemoryAlphaDatabaseFile
             throw new Exception('Could not parse XML: Could not find sidebar section.');
         }
 
-        $stripWikiLinks = function($value) {
-            return is_array($value)
-                ? array_map(function($item) { return trim(str_replace(['[[', ']]'], '', $item)); }, $value)
-                : trim(str_replace(['[[', ']]'], '', $value));
+        // Strip disambiguation links (ex: `{{dis|value1|value2}})`)
+        $stripDisambiguation = function ($value) {
+            return preg_match('/{{dis\|(.*)\|[a-zA-Z0-9\s]+}}+/', $value, $matches)
+                ? trim($matches[1])
+                : $value;
         };
 
-        $data = ['type' => $matches['type']];
-        $items = array_map('trim', explode('|', $matches['fields']));
+        // Strip wiki links (ex: `[[foo]]`)
+        $stripWikiLinks = function ($value) {
+            if (is_array($value)) {
+                return array_map(function ($item) {
+                    return trim(str_replace(['[[', ']]'], '', $item));
+                }, $value);
+            } else {
+                return trim(str_replace(['[[', ']]'], '', $value));
+            }
+        };
+
+        $data = ['__type__' => $matches['type']];
+
+        $items = array_filter(preg_split("/[\n]/", $matches['fields']), function ($item) {
+            return strlen(trim($item)) > 0;
+        });
+
         foreach ($items as $item) {
             // only grab key value pairs ($field = $value)
             if (strlen($item) == 0 || strpos($item, '=') === false) {
@@ -310,6 +384,10 @@ final class MemoryAlphaDatabaseFile
             list($field, $value) = explode('=', $item);
             $field = trim($field);
             $value = trim($value);
+
+            if (substr($field, 0, 1) == '|') {
+                $field = trim(substr($field, 1, strlen($field)-1));
+            }
 
             // rearrange date fields to YYYY-mm-dd format
             if (stripos($field, 'date') > 0 && strlen($value) == 8) {
@@ -322,7 +400,13 @@ final class MemoryAlphaDatabaseFile
             // values can contain HTML comments so strip them
             //$value = preg_replace('/(.*)\s*<!--(.*?)/', '$1', $value);
 
-            $data[$field] = $stripWikiLinks($value);
+            $value = $stripWikiLinks($value);
+
+            if ($matches['type'] == 'species') {
+                $value = $stripDisambiguation($value);
+            }
+
+            $data[$field] = trim($value);
         }
 
         // Some serial dates aren't complete so piece it together by its parts
