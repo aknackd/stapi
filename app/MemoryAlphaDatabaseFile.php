@@ -245,7 +245,7 @@ final class MemoryAlphaDatabaseFile
             //
             // Handle episodes
             //
-            case 'episodea':
+            case 'episode':
                 if (!$series->has($details['sSeries'])) {
                     continue;
                 }
