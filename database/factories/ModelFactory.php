@@ -65,3 +65,17 @@ $factory->define('App\Models\Episode', function (Faker\Generator $faker) {
         'air_date'      => $faker->date,
     ];
 });
+
+$factory->define('App\Models\Species', function (Faker\Generator $faker) {
+    $numQuadrants = $faker->numberBetween(0, 4);
+    $numPlanets = $faker->numberBetween(0, 3);
+    $quadrants = $faker->randomElements(['Alpha', 'Beta', 'Gamma', 'Delta'], $numQuadrants);
+    
+    return [
+        'name'       => $faker->word,
+        'type'       => $faker->word,
+        'quadrants'  => json_encode(array_flatten([$quadrants])),
+        'planets'    => json_encode($faker->words($numPlanets)),
+        'population' => (string) $faker->randomNumber,
+    ];
+});
