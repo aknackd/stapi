@@ -15,14 +15,42 @@ use App\Models\Episode;
 use App\Models\Series;
 use App\Models\Species;
 
+/**
+ * Represents a Memory Alpha database dump file.
+ */
 final class MemoryAlphaDatabaseFile
 {
     /**
      * Location of the current database dump from Memory Alpha.
+     * Note that Memory Alpha doesn't keep past archives, it only keeps the
+     * most recent backups (no idea how often or when backups are made).
      *
      * @var string
      */
     const DATABASE_DUMP_URL = 'https://s3.amazonaws.com/wikia_xml_dumps/e/en/enmemoryalpha_pages_current.xml.7z';
+
+    /**
+     * List of pages to skip during the import process. Mostly internal
+     * MediaWiki pages we don't care about.
+     *
+     * @var array
+     */
+    const PAGES_TO_IGNORE = [
+        'Memory Alpha:', 'Help:', 'User:', 'File:', 'User talk:', 'Talk:',
+        'Memory Alpha talk:', 'Template:', 'File talk:', 'Category:',
+        'Category talk:', 'Forum:', 'Help talk:', 'Template talk:',
+        'Portal:', 'Portal talk:',
+    ];
+
+    /**
+     * List of categories the import process handles. Used for keeping counts
+     * of records imported by category for displaying import statistics.
+     *
+     * NOTE: Update this with every new category being handled by `import()`.
+     *
+     * @var array
+     */
+    const IMPORT_CATEGORIES = ['episode', 'species'];
 
     /**
      * Retrieve the full path to the Memory Alpha database dump file.
@@ -161,12 +189,13 @@ final class MemoryAlphaDatabaseFile
         while ($node = $streamer->getNode()) {
             $xmlNode = simplexml_load_string($node);
             if (isset($xmlNode->sitename)) {
-                $siteName = (string) $xmlNode->sitename;
-                if (trim($siteName) == 'Memory Alpha') {
+                $siteName = trim((string) $xmlNode->sitename);
+                if ($siteName == 'Memory Alpha') {
                     $isValid = true;
                     break;
                 }
             }
+            unset($xmlNode);
         }
         unset($streamer);
 
@@ -177,24 +206,23 @@ final class MemoryAlphaDatabaseFile
      * Import data from a Memory Alpha database dump file into the database.
      *
      * @param string $filename Local filename path
-     * @return array Statistics of the import process when completed, in the
-     *               following format:
+     * @return array Statistics of the import process when completed, in the following format:
      *
-     *                   [
-     *                       'duration' => (int)   // Duration of import in seconds,
-     *                       'counts'   => (array) // Associative array containing counts of records imported, keys are section (i.e. episode, individual, etc.)     
-     *                   ]
+     *     [
+     *       'duration' => (int)   // Duration of import in seconds,
+     *       'counts'   => (array) // Array containing counts of records imported, keys are section (i.e. episodes, individuals, etc.)
+     *     ]
      *
-     *               Example:
+     *     Example:
      *
-     *                   [
-     *                       'duration' => 120,
-     *                       'counts'   => [
-     *                           'episode' => 122,
-     *                       ],
-     *                   ]
+     *     [
+     *       'duration' => 120,
+     *       'counts'   => [
+     *           'episodes'  => 122,
+     *        ],
+     *     ]
      *
-     *                   The import process took 120 seconds and imported 122 episodes.
+     *     In this example, the import process took 120 seconds and imported 122 episodes.
      */
     public static function import($filename)
     {
@@ -206,126 +234,86 @@ final class MemoryAlphaDatabaseFile
         // Series are automatically seeded on `php artisan db:seed`
         $series = Series::all()->pluck('id', 'abbreviation');
 
-        $counts = ['episodes' => 0, 'species' => 0];
+        // Strip categories from the page title as a suffix
+        // (i.e. if page title is "First Contact (episode)", remove "(episode)") 
+        $pageSuffixesToStrip = collect(self::IMPORT_CATEGORIES)
+            ->map(function ($item, $key) { return "({$item})"; })
+            ->toArray();
 
-        $pagesToIgnoreRegex = sprintf('/^(%s)/', implode('|', [
-            'Memory Alpha:', 'Help:', 'User:', 'File:', 'User talk:', 'Talk:',
-            'Memory Alpha talk:', 'Template:', 'File talk:', 'Category:',
-            'Category talk:', 'Forum:', 'Help talk:', 'Template talk:',
-            'Portal:', 'Portal talk:',
-        ]));
+        $counts = array_fill_keys(array_map('str_plural', self::IMPORT_CATEGORIES), 0);
+        $begin  = time();
 
-        $begin = time();
-
+        // Parse database dump XML one node at a time
         $streamer = XmlStringStreamer::createStringWalkerParser($filename);
         while ($node = $streamer->getNode()) {
-            $xmlNode = simplexml_load_string($node);
-
+            // 1) Parse XML node and grab the page title
+            if (($xmlNode = simplexml_load_string($node)) === false) {
+                logger()->error('import: Could not parse XML');
+                continue;
+            }
             if (!isset($xmlNode->title)) {
+                logger()->error('import: Could not find title in XML');
                 continue;
             }
 
+            // 2) Remove category from title if it's a suffix
             $title = (string) $xmlNode->title;
-            $title = trim(str_replace(['(episode)', '(species)'], '', $title));
-            if (preg_match($pagesToIgnoreRegex, $title)) {
+            $title = trim(str_replace($pageSuffixesToStrip, '', $title));
+
+            // 3) Skip pages we explicitly want to ignore
+            if (starts_with($title, self::PAGES_TO_IGNORE)) {
+                //logger()->debug('import: Skipping page', ['title' => $title]);
                 continue;
             }
 
+            // 4) Fetch page contents and parse the sidebar to get the page metadata
             $content = $xmlNode->revision->text;
-            $details = null;
+            $data = compact('title');
 
             try {
-                $details = self::parseXmlNode($content);
+                $data = array_merge($data, MemoryAlphaSidebar::parse($content));
             } catch (Exception $ex) {
+                logger()->warning('import: Could not parse page sidebar', [
+                    'error' => $ex->getMessage()]);
                 continue;
             }
 
-            switch ($details['__type__']) {
-
+            // 5) Import (create) database record
+            switch ($data[MemoryAlphaSidebar::TYPE_KEY]) {
             //
             // Handle episodes
             //
             case 'episode':
-                if (!$series->has($details['sSeries'])) {
+                if (!$series->has($data['sSeries'])) {
+                    logger()->error('Invalid series found', [
+                        'series' => $data['sSeries']]);
                     continue;
                 }
 
-                // NOTE: Multi-part episodes may not have an integer for its
-                //       episode number. For example, VOY: Caretaker (s1e01) is
-                //       a two-parter but only has one entry with
-                //       `nEpisode = 01/02`; the next episode VOY: Parallax is
-                //       `nEpisode = 3` (s1e03).
+                $data = array_merge($data, [
+                    'series_id' => $series->get($data['sSeries'])]);
 
-                Episode::create([
-                    'title'         => $title,
-                    'series_id'     => $series->get($details['sSeries']),
-                    'season_num'    => (int) $details['nSeason'],
-                    'episode_num'   => (int) $details['nEpisode'],
-                    'serial_number' => $details['sProductionSerialNumber'],
-                    'air_date'      => $details['nSerialAirdate'],
-                ]);
+                Episode::import($data);
                 $counts['episodes']++;
                 break;
-
             //
             // Handle species
             //
             case 'species':
-                $planets   = isset($details['planet'])   ? preg_split('/(<br \/>|\/)/', $details['planet'])   : [];
-                $quadrants = isset($details['quadrant']) ? preg_split('/(<br \/>|\/)/', $details['quadrant']) : [];
-
-                // Species could belong to more than one planet (ex: Voth)
-                if (isset($details['planet']) && isset($details['planet2'])) {
-                    $planets[] = preg_split('/(<br \/>|\/)/', $details['planet2']);
-                }
-                // Also quadrants (Voth, again)
-                if (isset($details['quadrant']) && isset($details['quadrant2'])) {
-                    $quadrants[] = preg_split('/(<br \/>|\/)/', $details['quadrant2']);
-                }
-
-                $planets = array_flatten($planets);
-                $quadrants = array_flatten($quadrants);
-
-                // Extract planet name from a wiki link, if present
-                foreach ($planets as $idx => $planet) {
-                    if (str_contains($planet, '|')) {
-                        $planet = array_first(explode('|', $planet));
-                        // Anchor link likely has the proper planet name
-                        if (str_contains($planet, '#')) {
-                            $planet = array_last(explode('#', $planet));
-                        }
-                    }
-                    $planets[$idx] = $planet;
-                }
-
-                // Only Milky Way Galaxy quadrants
-                $quadrants = array_filter($quadrants, function ($item) {
-                    if (is_array($item) && count($item) == 1) {
-                        $item = array_first($item);
-                    }
-                    return preg_match('/^(alpha|beta|gamma|delta)/i', $item);
-                });
-
-                if (isset($details['type'])) {
-                    // If a wiki link, get the proper name
-                    if (str_contains($details['type'], '|')) {
-                        $details['type'] = array_last(explode('|', $details['type']));
-                    } 
-                }
-
-                Species::create([
-                    'name'       => $title,
-                    'type'       => isset($details['type']) ? strtolower($details['type']) : null,
-                    'quadrants'  => json_encode($quadrants),
-                    'planets'    => json_encode($planets),
-                    'population' => isset($details['pop']) ? $details['pop'] : null,
-                ]);
+                Species::import($data);
                 $counts['species']++;
                 break;
+            //
+            // Unhandled type encountered
+            //
+            default:
+                logger()->info('import: Unhandled category', [
+                    'type' => $data['__type__']]);
+                break;
             }
-
-            unset($xmlNode, $content, $details);
+            unset($xmlNode, $content, $data);
         }
+        unset($streamer);
 
         $end = time();
 
@@ -333,98 +321,5 @@ final class MemoryAlphaDatabaseFile
             'duration' => $end - $begin,
             'counts'   => $counts,
         ];
-    }
-
-    /**
-     * Parse an XML page node, specifically the sidebar section as it
-     * contains an easy to parse summary of the page, which is *much*
-     * easier than parsing the actual contents of the page.
-     *
-     * @param string $xml XML node contents
-     * @return array Map of data
-     */
-    private static function parseXmlNode(&$xml)
-    {
-        // determine type of content based on sidebar type
-        $regex = "/\{\{sidebar (?P<type>[a-zA-Z0-9]+)(?P<fields>.*)\n\}\}/s";
-        if (!preg_match($regex, $xml, $matches)) {
-            throw new Exception('Could not parse XML: Could not find sidebar section.');
-        }
-
-        // Strip disambiguation links (ex: `{{dis|value1|value2}})`)
-        $stripDisambiguation = function ($value) {
-            return preg_match('/{{dis\|(.*)\|[a-zA-Z0-9\s]+}}+/', $value, $matches)
-                ? trim($matches[1])
-                : $value;
-        };
-
-        // Strip wiki links (ex: `[[foo]]`)
-        $stripWikiLinks = function ($value) {
-            if (is_array($value)) {
-                return array_map(function ($item) {
-                    return trim(str_replace(['[[', ']]'], '', $item));
-                }, $value);
-            } else {
-                return trim(str_replace(['[[', ']]'], '', $value));
-            }
-        };
-
-        $data = ['__type__' => $matches['type']];
-
-        $items = array_filter(preg_split("/[\n]/", $matches['fields']), function ($item) {
-            return strlen(trim($item)) > 0;
-        });
-
-        foreach ($items as $item) {
-            // only grab key value pairs ($field = $value)
-            if (strlen($item) == 0 || strpos($item, '=') === false) {
-                continue;
-            }
-
-            list($field, $value) = explode('=', $item);
-            $field = trim($field);
-            $value = trim($value);
-
-            if (substr($field, 0, 1) == '|') {
-                $field = trim(substr($field, 1, strlen($field)-1));
-            }
-
-            // rearrange date fields to YYYY-mm-dd format
-            if (stripos($field, 'date') > 0 && strlen($value) == 8) {
-                $value = preg_replace('/([0-9]{4})([0-9]{2})([0-9]{2})/', '$1-$2-$3', $value);
-            }
-            // fields beginning with 'ws' can contain multiple values
-            if (substr($field, 0, 2) == 'ws' && strlen($value) > 0) {
-                $value = array_filter(array_map('trim', preg_split('/( & | and | &amp; )/', $value)));
-            }
-            // values can contain HTML comments so strip them
-            //$value = preg_replace('/(.*)\s*<!--(.*?)/', '$1', $value);
-
-            $value = $stripWikiLinks($value);
-
-            if ($matches['type'] == 'species') {
-                $value = $stripDisambiguation($value);
-            }
-
-            $data[$field] = trim($value);
-        }
-
-        // Some serial dates aren't complete so piece it together by its parts
-        if (isset($data['nSerialAirdate']) && strlen($data['nSerialAirdate']) != 10) {
-            foreach (['Release', 'Airdate'] as $type) {
-                if (!isset($data['n'.$type.'Year'])) {
-                    continue;
-                }
-
-                $dt = new Carbon(sprintf('%s %s %s',
-                    $data['s'.$type.'Month'],
-                    $data['n'.$type.'Day'],
-                    $data['n'.$type.'Year']
-                ));
-                $data['nSerialAirdate'] = $dt->toDateString();
-            }
-        }
-
-        return $data;
     }
 }
