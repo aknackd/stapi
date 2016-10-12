@@ -14,6 +14,7 @@ use App\Helpers\HttpHelper;
 use App\Models\Episode;
 use App\Models\Series;
 use App\Models\Species;
+use App\Models\Starship;
 
 /**
  * Represents a Memory Alpha database dump file.
@@ -50,7 +51,7 @@ final class MemoryAlphaDatabaseFile
      *
      * @var array
      */
-    const IMPORT_CATEGORIES = ['episode', 'species'];
+    const IMPORT_CATEGORIES = ['episode', 'species', 'starship'];
 
     /**
      * Retrieve the full path to the Memory Alpha database dump file.
@@ -90,7 +91,7 @@ final class MemoryAlphaDatabaseFile
             throw new Exception(
                 'Unable to retrieve Memory Alpha database dump size: Missing Content-Type header');
         }
-            
+
         return $response->getHeaderLine('Content-Length');
     }
 
@@ -145,11 +146,11 @@ final class MemoryAlphaDatabaseFile
      * @param string $filename  Local filename path
      * @param string $outputDir Local directory to store extracted archive contents
      * @throws \Exception If unable to extract the Memory Alpha database dump file successfully
-     */ 
+     */
     public static function extract($filename, $outputDir)
     {
         $importFile = null;
-        
+
         // Extract local file
         $archive = new Archive7z($filename, EnvironmentHelper::findInPath('7za'));
         foreach ($archive->getEntries() as $entry) {
@@ -235,7 +236,7 @@ final class MemoryAlphaDatabaseFile
         $series = Series::all()->pluck('id', 'abbreviation');
 
         // Strip categories from the page title as a suffix
-        // (i.e. if page title is "First Contact (episode)", remove "(episode)") 
+        // (i.e. if page title is "First Contact (episode)", remove "(episode)")
         $pageSuffixesToStrip = collect(self::IMPORT_CATEGORIES)
             ->map(function ($item, $key) { return "({$item})"; })
             ->toArray();
@@ -289,7 +290,6 @@ final class MemoryAlphaDatabaseFile
                         'series' => $data['sSeries']]);
                     continue;
                 }
-
                 $data = array_merge($data, [
                     'series_id' => $series->get($data['sSeries'])]);
 
@@ -304,9 +304,17 @@ final class MemoryAlphaDatabaseFile
                 $counts['species']++;
                 break;
             //
+            // Handle starships
+            //
+            case 'starship':
+                Starship::import($data);
+                $counts['starships']++;
+                break;
+            //
             // Unhandled type encountered
             //
             default:
+                continue;
                 logger()->info('import: Unhandled category', [
                     'type' => $data['__type__']]);
                 break;
