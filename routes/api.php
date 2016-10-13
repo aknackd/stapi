@@ -23,4 +23,6 @@ Route::group(['prefix' => 'v1', 'namespace' => 'Api'], function () {
     Route::get('films/{film}',             'FilmsController@show');
     Route::get('/species',                 'SpeciesController@all');
     Route::get('/species/{species}',       'SpeciesController@show');
+    Route::get('/starships',               'StarshipsController@all');
+    Route::get('/starships/{starship}',    'StarshipsController@show');
 });

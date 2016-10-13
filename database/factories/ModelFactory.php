@@ -79,3 +79,30 @@ $factory->define('App\Models\Species', function (Faker\Generator $faker) {
         'population' => (string) $faker->randomNumber,
     ];
 });
+
+$factory->define('App\Models\Starship', function (Faker\Generator $faker) {
+    $namePrefix           = $faker->randomElement(['USS ', 'ISS ', 'IKR ', '']);
+    $name                 = $namePrefix.title_case($faker->word);
+    $registryNumberPrefix = $faker->randomElement(['NCC-', 'NX-', 'CV-', 'ISS-', '']);
+    $registryNumber       = $registryNumberPrefix.$faker->numberBetween(1, 99999);
+
+    $multi = [];
+    foreach (['owners', 'operators', 'status', 'status_at'] as $field) {
+        $numItems = $faker->numberBetween(1, 4);
+        $multi[$field] = collect(range(0, $numItems-1))->map(function ($item, $key) use ($field, $faker) {
+            return $field == 'status_at'
+                ? (int) $faker->year
+                : title_case($faker->word);
+        })->toArray();
+    }
+
+    return [
+        'name'            => $name,
+        'class'           => title_case($faker->word),
+        'registry_number' => $registryNumber,
+        'owners'          => json_encode($multi['owners']),
+        'operators'       => json_encode($multi['operators']),
+        'status'          => json_encode($multi['status']),
+        'status_at'       => json_encode($multi['status_at']), 
+    ];
+});
