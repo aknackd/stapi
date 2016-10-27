@@ -39,10 +39,3 @@ There are no plans to incorporate data from [Memory Beta](http://memory-beta.wik
 #### Licensing Notice
 
 Memory Alpha content is licensed under the [CC-BY-NC license](http://memory-alpha.wikia.com/wiki/Memory_Alpha:Creative_Commons_License) and the terms and conditions of the [Wikia Licensing policy](http://www.wikia.com/Licensing).
-
-### TODO
-
-- [X] Import `starship`
-- [ ] Import `sharship class`
-- [ ] Import `individual`
-- [ ] Import `planet`
