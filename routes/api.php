@@ -14,15 +14,17 @@ use Illuminate\Http\Request;
 */
 
 Route::group(['prefix' => 'v1', 'namespace' => 'Api'], function () {
-    Route::get('series',                   'SeriesController@all');
-    Route::get('series/{series}',          'SeriesController@show');
-    Route::get('series/{series}/episodes', 'SeriesController@episodes');
-    Route::get('episodes',                 'EpisodesController@all');
-    Route::get('episodes/{episode}',       'EpisodesController@show');
-    Route::get('films',                    'FilmsController@all');
-    Route::get('films/{film}',             'FilmsController@show');
-    Route::get('/species',                 'SpeciesController@all');
-    Route::get('/species/{species}',       'SpeciesController@show');
-    Route::get('/starships',               'StarshipsController@all');
-    Route::get('/starships/{starship}',    'StarshipsController@show');
+    Route::get('series',                            'SeriesController@all');
+    Route::get('series/{series}',                   'SeriesController@show');
+    Route::get('series/{series}/episodes',          'SeriesController@episodes');
+    Route::get('episodes',                          'EpisodesController@all');
+    Route::get('episodes/{episode}',                'EpisodesController@show');
+    Route::get('films',                             'FilmsController@all');
+    Route::get('films/{film}',                      'FilmsController@show');
+    Route::get('/species',                          'SpeciesController@all');
+    Route::get('/species/{species}',                'SpeciesController@show');
+    Route::get('/starships',                        'StarshipsController@all');
+    Route::get('/starships/{starship}',             'StarshipsController@show');
+    Route::get('/starship_classes',                 'StarshipClassesController@all');
+    Route::get('/starship_classes/{starshipClass}', 'StarshipClassesController@show');
 });

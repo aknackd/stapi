@@ -106,3 +106,29 @@ $factory->define('App\Models\Starship', function (Faker\Generator $faker) {
         'status_at'       => json_encode($multi['status_at']), 
     ];
 });
+
+$factory->define('App\Models\StarshipClass', function (Faker\Generator $faker) {
+    $multi = [];
+    foreach (['owner', 'operator', 'affiliation', 'speed', 'armament', 'defenses', 'crew'] as $field) {
+        $numItems = $faker->numberBetween(1, 4);
+        $multi[$field] = collect(range(0, $numItems-1))->map(function ($item, $key) use ($field, $faker) {
+            return title_case($faker->word);
+        })->toArray();
+    }
+ 
+    return [
+        'name'          => $faker->word,
+        'owner'         => json_encode($multi['owner']),
+        'operator'      => json_encode($multi['operator']),
+        'active_during' => $faker->year,
+        'affiliation'   => json_encode($multi['affiliation']),
+        'type'          => $faker->word,
+        'length'        => $faker->numberBetween(100, 100000),
+        'mass'          => $faker->numberBetween(100, 100000),
+        'speed'         => json_encode($multi['speed']),
+        'decks'         => $faker->numberBetween(1, 30),
+        'armament'      => json_encode($multi['armament']),
+        'defenses'      => json_encode($multi['defenses']),
+        'crew'          => json_encode($multi['crew']),
+    ];
+});
