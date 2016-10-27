@@ -25,7 +25,7 @@ class CreateStarshipClassesTable extends Migration
             $table->string('mass')->nullable()->default(null);
             $table->string('speed')->nullable()->default(null);
             $table->string('decks')->nullable()->default(null);
-            $table->string('armanent')->nullable()->default(null);
+            $table->string('armament')->nullable()->default(null);
             $table->string('defenses')->nullable()->default(null);
             $table->string('crew')->nullable()->default(null);
             $table->timestamps();
