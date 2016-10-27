@@ -31,7 +31,7 @@ final class MemoryAlphaSidebar
     public static function parse(&$xml)
     {
         $categories = sprintf('%s', implode('|', MemoryAlphaDatabaseFile::IMPORT_CATEGORIES));
-        $regex = sprintf("/\{\{sidebar (?P<type>%s)(?P<fields>.*)\n\}\}/s", $categories);
+        $regex = sprintf("/\{\{[sS]idebar (?P<type>%s)(?P<fields>.*)\|?\n\}\}/s", $categories);
 
         // determine type of content based on sidebar type
         if (!preg_match($regex, $xml, $matches)) {

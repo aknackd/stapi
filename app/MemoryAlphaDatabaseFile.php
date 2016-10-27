@@ -15,6 +15,7 @@ use App\Models\Episode;
 use App\Models\Series;
 use App\Models\Species;
 use App\Models\Starship;
+use App\Models\StarshipClass;
 
 /**
  * Represents a Memory Alpha database dump file.
@@ -51,7 +52,7 @@ final class MemoryAlphaDatabaseFile
      *
      * @var array
      */
-    const IMPORT_CATEGORIES = ['episode', 'species', 'starship'];
+    const IMPORT_CATEGORIES = ['episode', 'species', 'starship class', 'starship'];
 
     /**
      * Retrieve the full path to the Memory Alpha database dump file.
@@ -309,6 +310,11 @@ final class MemoryAlphaDatabaseFile
             case 'starship':
                 Starship::import($data);
                 $counts['starships']++;
+                break;
+
+            case 'starship class':
+                StarshipClass::import($data);
+                $counts['starship classes']++;
                 break;
             //
             // Unhandled type encountered
